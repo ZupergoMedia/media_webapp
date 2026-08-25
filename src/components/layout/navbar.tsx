@@ -96,10 +96,22 @@ export async function Navbar() {
             </div>
           )}
 
-          <ThemeToggle />
+          {/*
+            Hidden below sm — NavMenu's drawer already carries a Theme
+            section (ThemeToggleInline), and showing both crowds the bar on
+            a phone-width screen alongside the account avatar and hamburger.
+          */}
+          <div className="hidden sm:block">
+            <ThemeToggle />
+          </div>
 
           {user ? (
-            <UserMenu email={user.email} name={user.name} role={user.role} />
+            // Hidden below sm — the drawer's account footer already shows
+            // name/email/role and sign-out, so a phone-width screen would
+            // otherwise carry two separate account entry points at once.
+            <div className="hidden sm:block">
+              <UserMenu email={user.email} name={user.name} role={user.role} />
+            </div>
           ) : (
             <Button
               variant="secondary"

@@ -261,7 +261,9 @@ export function NavMenu({
             className="absolute inset-y-0 right-0 flex w-[min(20rem,85vw)] flex-col bg-surface shadow-xl"
           >
             <div className="flex h-16 shrink-0 items-center justify-between border-b border-border px-4">
-              <span className="font-semibold tracking-tight">More</span>
+              {/* "Menu" here, not "More" — below md this drawer is the
+                  entire nav, not a secondary overflow of bar links. */}
+              <span className="font-semibold tracking-tight">Menu</span>
               <button
                 type="button"
                 onClick={close}
