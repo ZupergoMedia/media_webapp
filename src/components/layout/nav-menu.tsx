@@ -253,12 +253,17 @@ export function NavMenu({
             type="button"
             aria-label="Close menu"
             onClick={close}
-            className="absolute inset-0 bg-foreground/40 backdrop-blur-[1px]"
+            // A fixed black scrim, not `bg-foreground/40`: `--foreground` is
+            // a LIGHT colour in dark mode, so that combination mixed a pale
+            // tint over the page instead of darkening it — the backdrop read
+            // as barely-there instead of dimmed. Black at 55% darkens
+            // correctly in both themes.
+            className="absolute inset-0 bg-black/55 backdrop-blur-[1px]"
           />
 
           <div
             id="primary-nav-menu"
-            className="absolute inset-y-0 right-0 flex w-[min(20rem,85vw)] flex-col bg-surface shadow-xl"
+            className="absolute inset-y-0 right-0 flex w-[min(20rem,85vw)] flex-col border-l border-border-strong bg-surface shadow-2xl"
           >
             <div className="flex h-16 shrink-0 items-center justify-between border-b border-border px-4">
               {/* "Menu" here, not "More" — below md this drawer is the
