@@ -92,31 +92,31 @@
  */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --background: #16171b;
-    --foreground: #eceae3;
+    --background: #0d1117;
+    --foreground: #e6e9f0;
 
-    --surface: #1e2024;
-    --surface-muted: #26282d;
-    --surface-sunken: #2e3136;
+    --surface: #151b25;
+    --surface-muted: #1c2330;
+    --surface-sunken: #242c3b;
 
     --brand: #7b8cf0;
     --brand-hover: #94a2f3;
-    --brand-subtle: #262c4d;
-    --brand-foreground: #12142b;
+    --brand-subtle: #212a4d;
+    --brand-foreground: #0e1220;
 
     --accent: #4fc3bd;
     --accent-hover: #6fd0cb;
-    --accent-subtle: #16302e;
-    --accent-foreground: #0a1f1d;
+    --accent-subtle: #12292f;
+    --accent-foreground: #081c1f;
 
     --highlight: #e0a34e;
-    --highlight-subtle: #3a2c14;
+    --highlight-subtle: #33280f;
 
-    --muted-foreground: #a6a9b3;
-    --subtle-foreground: #7c7f88;
+    --muted-foreground: #9aa4b8;
+    --subtle-foreground: #6b7690;
 
-    --border: #34363c;
-    --border-strong: #46494f;
+    --border: #29303f;
+    --border-strong: #3b4356;
 
     --success: #4fbd8d;
     --success-subtle: #163025;
@@ -130,31 +130,31 @@
 }
 
 :root[data-theme="dark"] {
-  --background: #16171b;
-  --foreground: #eceae3;
+  --background: #0d1117;
+  --foreground: #e6e9f0;
 
-  --surface: #1e2024;
-  --surface-muted: #26282d;
-  --surface-sunken: #2e3136;
+  --surface: #151b25;
+  --surface-muted: #1c2330;
+  --surface-sunken: #242c3b;
 
   --brand: #7b8cf0;
   --brand-hover: #94a2f3;
-  --brand-subtle: #262c4d;
-  --brand-foreground: #12142b;
+  --brand-subtle: #212a4d;
+  --brand-foreground: #0e1220;
 
   --accent: #4fc3bd;
   --accent-hover: #6fd0cb;
-  --accent-subtle: #16302e;
-  --accent-foreground: #0a1f1d;
+  --accent-subtle: #12292f;
+  --accent-foreground: #081c1f;
 
   --highlight: #e0a34e;
-  --highlight-subtle: #3a2c14;
+  --highlight-subtle: #33280f;
 
-  --muted-foreground: #a6a9b3;
-  --subtle-foreground: #7c7f88;
+  --muted-foreground: #9aa4b8;
+  --subtle-foreground: #6b7690;
 
-  --border: #34363c;
-  --border-strong: #46494f;
+  --border: #29303f;
+  --border-strong: #3b4356;
 
   --success: #4fbd8d;
   --success-subtle: #163025;

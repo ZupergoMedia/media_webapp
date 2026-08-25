@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { MapView, type MapBounds } from "@/components/map/map-view";
+import { MapAssetPreview } from "@/components/map/map-asset-preview";
 import type {
   AssetSummary,
   MapCluster,
@@ -44,6 +45,10 @@ export function MapClient({ taxonomy, cities }: MapClientProps) {
   const [bounds, setBounds] = useState<MapBounds | null>(null);
   const [zoom, setZoom] = useState(11);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Holds the full asset, not just its id, so the preview card survives even
+  // if the marker's asset falls out of the current viewport's fetched set
+  // (e.g. the user pans away right after clicking).
+  const [selectedAsset, setSelectedAsset] = useState<AssetSummary | null>(null);
   const [queryDraft, setQueryDraft] = useState(params.get("q") ?? "");
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -331,7 +336,10 @@ export function MapClient({ taxonomy, cities }: MapClientProps) {
           selectedAssetId={selectedId}
           isLoading={mapQuery.isFetching}
           onBoundsChange={handleBoundsChange}
-          onSelectAsset={(asset) => setSelectedId(asset?.id ?? null)}
+          onSelectAsset={(asset) => {
+            setSelectedId(asset?.id ?? null);
+            setSelectedAsset(asset);
+          }}
         />
 
         <Button
@@ -343,6 +351,16 @@ export function MapClient({ taxonomy, cities }: MapClientProps) {
           <SlidersHorizontal className="size-4" />
           Filters{activeCount > 0 ? ` (${activeCount})` : ""}
         </Button>
+
+        {selectedAsset && (
+          <MapAssetPreview
+            asset={selectedAsset}
+            onClose={() => {
+              setSelectedId(null);
+              setSelectedAsset(null);
+            }}
+          />
+        )}
       </section>
     </div>
   );
