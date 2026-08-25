@@ -67,6 +67,9 @@ export async function Navbar() {
           >
             How it works
           </Link>
+          <Link href="/blog" className="transition-colors hover:text-foreground">
+            Blog
+          </Link>
         </div>
 
         <div className="ml-auto flex items-center gap-2">

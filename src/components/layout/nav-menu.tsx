@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 import {
+  BookOpen,
   Building2,
   Home,
   Inbox,
@@ -142,6 +143,9 @@ export function NavMenu({
         </Item>
         <Item href="/how-it-works" icon={ShieldCheck} onNavigate={close}>
           How it works
+        </Item>
+        <Item href="/blog" icon={BookOpen} onNavigate={close}>
+          Blog
         </Item>
         <Item href="/about" icon={Building2} onNavigate={close}>
           About us
