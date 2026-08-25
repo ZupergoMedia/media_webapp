@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
@@ -41,6 +41,7 @@ export function ExploreClient({ taxonomy, cities }: ExploreClientProps) {
   const params = useSearchParams();
 
   const [queryDraft, setQueryDraft] = useState(params.get("q") ?? "");
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const allTypes = useMemo(
     () => taxonomy.flatMap((category) => category.assetTypes),
@@ -117,6 +118,88 @@ export function ExploreClient({ taxonomy, cities }: ExploreClientProps) {
     router.replace("/explore", { scroll: false });
   };
 
+  // Stops the results list scrolling behind the open filter sheet.
+  useEffect(() => {
+    if (!filtersOpen) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [filtersOpen]);
+
+  // Escape closes the sheet, matching the nav drawer.
+  useEffect(() => {
+    if (!filtersOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setFiltersOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [filtersOpen]);
+
+  /**
+   * The four dropdowns, rendered twice: inline on `lg+`, and inside the
+   * mobile/tablet filter sheet. Extracted rather than duplicated so a filter
+   * can never exist at one breakpoint and go missing at another.
+   */
+  const filterControls = (
+    <>
+      <FilterSelect
+        label="City"
+        value={params.get("city") ?? "all"}
+        onChange={(value) => updateParams({ city: value })}
+        options={[
+          { value: "all", label: "All cities" },
+          ...cities.map((city) => ({
+            value: city.city,
+            label: `${city.city} (${city.count})`,
+          })),
+        ]}
+      />
+
+      <FilterSelect
+        label="Category"
+        value={params.get("categories") ?? "all"}
+        onChange={(value) => updateParams({ categories: value, types: undefined })}
+        options={[
+          { value: "all", label: "All categories" },
+          ...taxonomy.map((category) => ({
+            value: category.slug,
+            label: `${category.name} (${category._count.assets})`,
+          })),
+        ]}
+      />
+
+      <FilterSelect
+        label="Media type"
+        value={params.get("types") ?? "all"}
+        onChange={(value) => updateParams({ types: value })}
+        options={[
+          { value: "all", label: "All types" },
+          // Scoped to the chosen category so the list stays navigable
+          // rather than dumping every type at once.
+          ...(params.get("categories")
+            ? taxonomy
+                .filter((c) => c.slug === params.get("categories"))
+                .flatMap((c) => c.assetTypes)
+            : allTypes
+          ).map((type) => ({ value: type.slug, label: type.name })),
+        ]}
+      />
+
+      <FilterSelect
+        label="Sort by"
+        value={sort}
+        onChange={(value) => updateParams({ sort: value })}
+        options={SORT_OPTIONS.map((option) => ({
+          value: option,
+          label: SORT_LABELS[option],
+        }))}
+      />
+    </>
+  );
+
   return (
     <>
       {/* Inventory summary */}
@@ -145,6 +228,13 @@ export function ExploreClient({ taxonomy, cities }: ExploreClientProps) {
       {/* Filters */}
       <div className="sticky top-16 z-30 border-b border-border bg-surface-muted">
         <div className="mx-auto max-w-[1600px] px-4 py-3">
+          {/*
+            Search stays visible at every width — it is the primary action.
+            The four selects collapse behind a Filters button below `lg`:
+            stacked inline they pushed the first result card roughly a full
+            screen down on a phone, so the page opened on a wall of form
+            controls instead of inventory.
+          */}
           <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-6">
             <form
               className="relative lg:col-span-2"
@@ -187,60 +277,21 @@ export function ExploreClient({ taxonomy, cities }: ExploreClientProps) {
               </div>
             </form>
 
-            <FilterSelect
-              label="City"
-              value={params.get("city") ?? "all"}
-              onChange={(value) => updateParams({ city: value })}
-              options={[
-                { value: "all", label: "All cities" },
-                ...cities.map((city) => ({
-                  value: city.city,
-                  label: `${city.city} (${city.count})`,
-                })),
-              ]}
-            />
+            {/* Inline from lg up, where there is room for all four. */}
+            <div className="hidden gap-2 lg:col-span-4 lg:grid lg:grid-cols-4">
+              {filterControls}
+            </div>
 
-            <FilterSelect
-              label="Category"
-              value={params.get("categories") ?? "all"}
-              onChange={(value) =>
-                updateParams({ categories: value, types: undefined })
-              }
-              options={[
-                { value: "all", label: "All categories" },
-                ...taxonomy.map((category) => ({
-                  value: category.slug,
-                  label: `${category.name} (${category._count.assets})`,
-                })),
-              ]}
-            />
-
-            <FilterSelect
-              label="Media type"
-              value={params.get("types") ?? "all"}
-              onChange={(value) => updateParams({ types: value })}
-              options={[
-                { value: "all", label: "All types" },
-                // Scoped to the chosen category so the list stays navigable
-                // rather than dumping every type at once.
-                ...(params.get("categories")
-                  ? taxonomy
-                      .filter((c) => c.slug === params.get("categories"))
-                      .flatMap((c) => c.assetTypes)
-                  : allTypes
-                ).map((type) => ({ value: type.slug, label: type.name })),
-              ]}
-            />
-
-            <FilterSelect
-              label="Sort by"
-              value={sort}
-              onChange={(value) => updateParams({ sort: value })}
-              options={SORT_OPTIONS.map((option) => ({
-                value: option,
-                label: SORT_LABELS[option],
-              }))}
-            />
+            {/* Trigger below lg. Carries the active count so a collapsed
+                filter set never looks like no filter set. */}
+            <Button
+              variant="secondary"
+              onClick={() => setFiltersOpen(true)}
+              className="h-10 self-end lg:hidden"
+            >
+              <SlidersHorizontal className="size-4" />
+              Filters{activeFilters > 0 ? ` (${activeFilters})` : ""}
+            </Button>
           </div>
 
           {activeFilters > 0 && (
@@ -263,6 +314,60 @@ export function ExploreClient({ taxonomy, cities }: ExploreClientProps) {
           )}
         </div>
       </div>
+
+      {/* Filter sheet — below lg only. Slides from the right, matching the
+          nav drawer, so "panel from the right" means one thing app-wide. */}
+      {filtersOpen && (
+        <div
+          className="fixed inset-0 z-40 lg:hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Filters"
+        >
+          <button
+            type="button"
+            aria-label="Close filters"
+            onClick={() => setFiltersOpen(false)}
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm motion-safe:animate-[drawer-fade-in_160ms_ease-out]"
+          />
+
+          <div className="absolute inset-y-0 right-0 z-10 flex w-[min(20rem,88vw)] flex-col border-l border-border bg-surface shadow-2xl motion-safe:animate-[drawer-slide-in_220ms_cubic-bezier(0.32,0.72,0,1)]">
+            <div className="flex h-16 shrink-0 items-center justify-between border-b border-border px-4">
+              <span className="font-semibold tracking-tight">Filters</span>
+              <button
+                type="button"
+                onClick={() => setFiltersOpen(false)}
+                aria-label="Close filters"
+                className="flex size-9 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 space-y-4 overflow-y-auto p-4">
+              {filterControls}
+            </div>
+
+            <div className="shrink-0 space-y-2 border-t border-border p-4">
+              {activeFilters > 0 && (
+                <Button
+                  variant="secondary"
+                  className="w-full"
+                  onClick={() => {
+                    clearAll();
+                    setFiltersOpen(false);
+                  }}
+                >
+                  Clear all filters
+                </Button>
+              )}
+              <Button className="w-full" onClick={() => setFiltersOpen(false)}>
+                Show {total} {total === 1 ? "result" : "results"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Results */}
       <div className="mx-auto max-w-[1600px] px-4 py-6">

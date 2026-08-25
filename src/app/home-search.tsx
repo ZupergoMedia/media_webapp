@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search } from "lucide-react";
+import { ChevronDown, Search, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { Taxonomy } from "@/server/services/asset-service";
+import { cn } from "@/lib/utils";
 
 /**
  * Hero search.
@@ -34,6 +35,13 @@ export function HomeSearch({
   const [category, setCategory] = useState("all");
   const [budget, setBudget] = useState("");
   const [from, setFrom] = useState("");
+  /**
+   * Below `md`, only Location and the submit button are shown; asset type,
+   * date and budget collapse behind a "More filters" toggle. Stacked, all
+   * five controls pushed the hero's own content off a phone screen, so the
+   * page opened on a form rather than on what the product is.
+   */
+  const [refinementsOpen, setRefinementsOpen] = useState(false);
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -83,7 +91,12 @@ export function HomeSearch({
           </Select>
         </div>
 
-        <div className="flex flex-col justify-end gap-1.5">
+        <div
+          className={cn(
+            "flex-col justify-end gap-1.5 md:flex",
+            refinementsOpen ? "flex" : "hidden",
+          )}
+        >
           <Label htmlFor="hero-category" className="text-xs text-muted-foreground">
             Asset type
           </Label>
@@ -102,7 +115,12 @@ export function HomeSearch({
           </Select>
         </div>
 
-        <div className="flex flex-col justify-end gap-1.5">
+        <div
+          className={cn(
+            "flex-col justify-end gap-1.5 md:flex",
+            refinementsOpen ? "flex" : "hidden",
+          )}
+        >
           <Label htmlFor="hero-from" className="text-xs text-muted-foreground">
             Start date
           </Label>
@@ -115,7 +133,12 @@ export function HomeSearch({
           />
         </div>
 
-        <div className="flex flex-col justify-end gap-1.5">
+        <div
+          className={cn(
+            "flex-col justify-end gap-1.5 md:flex",
+            refinementsOpen ? "flex" : "hidden",
+          )}
+        >
           <Label
             htmlFor="hero-budget"
             className="whitespace-nowrap text-xs text-muted-foreground"
@@ -141,6 +164,25 @@ export function HomeSearch({
           </Button>
         </div>
       </div>
+
+      {/* Refinement toggle — below md only, where the three extra fields are
+          collapsed. Above md they are always inline and this is redundant. */}
+      <button
+        type="button"
+        onClick={() => setRefinementsOpen((value) => !value)}
+        aria-expanded={refinementsOpen}
+        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-control py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground md:hidden"
+      >
+        <SlidersHorizontal className="size-4" aria-hidden="true" />
+        {refinementsOpen ? "Fewer filters" : "More filters"}
+        <ChevronDown
+          className={cn(
+            "size-4 transition-transform",
+            refinementsOpen && "rotate-180",
+          )}
+          aria-hidden="true"
+        />
+      </button>
     </form>
   );
 }

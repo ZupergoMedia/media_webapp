@@ -300,10 +300,16 @@ export function MapClient({ taxonomy, cities }: MapClientProps) {
             type="button"
             aria-label="Close filters"
             onClick={() => setFiltersOpen(false)}
-            className="absolute inset-0 bg-foreground/40"
+            // Black, not `bg-foreground/40`: --foreground is a LIGHT colour
+            // in dark mode, so that mixed a pale tint over the page instead
+            // of darkening it.
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
           />
-          <div className="absolute inset-y-0 left-0 w-[min(20rem,85vw)] bg-surface shadow-xl">
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          {/* From the right, matching the nav drawer and the Explore filter
+              sheet — "a panel slides in from the right" should mean one thing
+              across the app. */}
+          <div className="absolute inset-y-0 right-0 z-10 flex w-[min(20rem,88vw)] flex-col border-l border-border bg-surface shadow-2xl motion-safe:animate-[drawer-slide-in_220ms_cubic-bezier(0.32,0.72,0,1)]">
+            <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
               <span className="text-sm font-semibold">Filters</span>
               <button
                 type="button"
@@ -314,7 +320,10 @@ export function MapClient({ taxonomy, cities }: MapClientProps) {
                 <X className="size-4" />
               </button>
             </div>
-            <div className="h-[calc(100%-3.25rem)]">{sidebar}</div>
+            {/* flex-1 rather than a height calc: the header is shrink-0, so
+                the body takes exactly the remaining space without hardcoding
+                the header's height. */}
+            <div className="min-h-0 flex-1">{sidebar}</div>
           </div>
         </div>
       )}
