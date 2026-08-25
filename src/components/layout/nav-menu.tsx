@@ -21,6 +21,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ThemeToggleInline } from "./theme-toggle";
 import { cn } from "@/lib/utils";
 
 /**
@@ -130,6 +131,10 @@ export function NavMenu({
         <Item href="/about" icon={Building2} onNavigate={close}>
           About us
         </Item>
+      </Section>
+
+      <Section label="Theme">
+        <ThemeToggleInline />
       </Section>
 
       {/*

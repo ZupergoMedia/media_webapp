@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/server/auth";
 import { getOwnerForUser } from "@/server/services/owner-service";
 import { UserMenu } from "./user-menu";
 import { NavMenu } from "./nav-menu";
+import { ThemeToggle } from "./theme-toggle";
 
 /**
  * Primary navigation.
@@ -41,10 +42,7 @@ export async function Navbar() {
           href="/"
           className="flex items-center gap-2 font-semibold tracking-tight"
         >
-          <span className="flex size-7 items-center justify-center rounded-md bg-brand text-sm font-bold text-brand-foreground">
-            Z
-          </span>
-          <span className="text-lg">ZuperGo</span>
+          <span className="text-lg">ZuperGo Media</span>
         </Link>
 
         <div className="ml-4 hidden items-center gap-5 text-sm text-muted-foreground lg:flex">
@@ -97,6 +95,8 @@ export async function Navbar() {
               </Link>
             </div>
           )}
+
+          <ThemeToggle />
 
           {user ? (
             <UserMenu email={user.email} name={user.name} role={user.role} />
