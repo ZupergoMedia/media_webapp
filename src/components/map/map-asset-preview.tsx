@@ -7,10 +7,12 @@ import { VerificationBadge } from "@/components/marketplace/verification-badge";
 
 /**
  * The "short asset card" the map spec calls for: clicking a marker surfaces
- * this rather than only highlighting the pin. Floats over the map instead of
- * a MapLibre popup anchored to the marker — a fixed corner position stays
- * fully visible and reachable on mobile, where an anchored popup would often
- * render half off-screen or get covered by a thumb.
+ * this rather than only highlighting the pin.
+ *
+ * Rendered inside a react-map-gl `Popup` anchored to the marker's own
+ * coordinates (see map-view.tsx), so it appears right where the click
+ * happened and tracks that marker through pan/zoom, rather than sitting at a
+ * fixed screen position disconnected from whichever pin was clicked.
  */
 export function MapAssetPreview({
   asset,
@@ -26,7 +28,7 @@ export function MapAssetPreview({
   });
 
   return (
-    <div className="absolute bottom-3 left-3 right-3 z-20 mx-auto max-w-sm overflow-hidden rounded-card border border-border bg-surface shadow-xl sm:left-3 sm:right-auto">
+    <div className="w-72 max-w-[80vw] overflow-hidden rounded-card border border-border bg-surface shadow-xl">
       <button
         type="button"
         onClick={onClose}

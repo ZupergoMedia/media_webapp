@@ -233,19 +233,29 @@
   }
 }
 
-/* Mapbox surfaces its own stylesheet; these overrides keep it on-brand. */
-.mapboxgl-popup-content {
+/*
+ * The map renders through MapLibre GL (react-map-gl/maplibre), which ships
+ * its own popup/control chrome under an `maplibregl-` prefix — these
+ * overrides keep it on-brand. (Mapbox-gl is an installed but unused
+ * dependency; `mapboxgl-` prefixed rules here would never match anything.)
+ */
+.maplibregl-popup-content {
   padding: 0 !important;
   border-radius: var(--radius-card) !important;
   box-shadow: 0 8px 28px rgb(11 15 25 / 0.16) !important;
   overflow: hidden;
+  background: transparent !important;
 }
 
-.mapboxgl-popup-close-button {
+.maplibregl-popup-close-button {
   display: none;
 }
 
-.mapboxgl-ctrl-logo,
-.mapboxgl-ctrl-attrib {
+.maplibregl-popup-tip {
+  display: none;
+}
+
+.maplibregl-ctrl-logo,
+.maplibregl-ctrl-attrib {
   opacity: 0.6;
 }

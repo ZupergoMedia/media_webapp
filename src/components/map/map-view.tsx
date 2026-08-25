@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Map, {
   Marker,
   NavigationControl,
+  Popup,
   type MapRef,
   type ViewStateChangeEvent,
 } from "react-map-gl/maplibre";
@@ -12,6 +13,7 @@ import type { AssetSummary, MapCluster } from "@/server/services/asset-service";
 import { formatPaiseCompact } from "@/lib/format";
 import { DEFAULT_CENTER, DEFAULT_ZOOM, getMapStyle } from "@/lib/map/config";
 import { cn } from "@/lib/utils";
+import { MapAssetPreview } from "./map-asset-preview";
 
 export interface MapBounds {
   minLng: number;
@@ -57,6 +59,11 @@ export function MapView({
   const [isStyleLoaded, setStyleLoaded] = useState(false);
 
   const mapStyle = useMemo(() => getMapStyle(), []);
+
+  const selectedAsset =
+    selectedAssetId && assets
+      ? (assets.find((asset) => asset.id === selectedAssetId) ?? null)
+      : null;
 
   /** Reports the current viewport upward. */
   const emitBounds = useCallback(
@@ -191,6 +198,30 @@ export function MapView({
             </Marker>
           );
         })}
+
+        {/* Anchored to the clicked marker's own coordinates — via Popup, not
+            a fixed screen position — so it appears where the click actually
+            happened and stays pinned to that marker through pan/zoom. */}
+        {selectedAsset?.lat !== undefined &&
+          selectedAsset?.lat !== null &&
+          selectedAsset?.lng !== undefined &&
+          selectedAsset?.lng !== null && (
+            <Popup
+              longitude={selectedAsset.lng}
+              latitude={selectedAsset.lat}
+              anchor="bottom"
+              offset={14}
+              closeButton={false}
+              closeOnClick={false}
+              maxWidth="320px"
+              className="map-asset-popup"
+            >
+              <MapAssetPreview
+                asset={selectedAsset}
+                onClose={() => onSelectAsset?.(null)}
+              />
+            </Popup>
+          )}
       </Map>
 
       {/* Tile loading is separate from data loading; this covers data. */}
