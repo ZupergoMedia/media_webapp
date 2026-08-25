@@ -159,7 +159,20 @@ export function HomeSearch({
           Each field is a flex column with `justify-end`, so the inputs align
           to the bottom of the row no matter how tall a label ends up.
         */}
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_11rem_9rem_auto]">
+        {/*
+          Deliberately 2-up from md, never a single row.
+
+          This form does not get the page width — the hero places it inside a
+          `lg:grid-cols-[1fr_1.05fr]` column, so it has roughly 620px to work
+          with regardless of viewport, not the 896px its own max-width
+          suggests. Five columns in that space left the two selects about
+          53px each, which wrapped their labels, wrapped "Any city" / "All
+          media" inside the triggers, and pushed the select chevrons outside
+          their boxes. Even trimming the fixed columns only got them to
+          ~69px, so a single row is not achievable here at any breakpoint —
+          two comfortable rows beat one cramped one.
+        */}
+        <div className="grid gap-3 md:grid-cols-2">
           <div className="flex flex-col justify-end gap-1.5">
             <Label htmlFor="hero-city" className="text-xs text-muted-foreground">
               Location
@@ -179,7 +192,9 @@ export function HomeSearch({
             </Select>
           </div>
 
-          {/* Inline from md up, where the row has space for all four. */}
+          {/* Inline from md up. `contents` so each field is its own grid
+              item and flows into the 2-up layout, rather than three fields
+              cramming into a single cell. */}
           <div className="hidden md:contents">{refinements}</div>
 
           {/* Trigger below md, sharing the row with Location. */}
@@ -193,8 +208,10 @@ export function HomeSearch({
             Filters{activeCount > 0 ? ` (${activeCount})` : ""}
           </Button>
 
-          <div className="flex flex-col justify-end">
-            <Button type="submit" size="lg" className="h-11 w-full md:w-auto">
+          {/* Spans both columns so the submit is full-width on its own row
+              rather than stranded in a half column beside a gap. */}
+          <div className="flex flex-col justify-end md:col-span-2">
+            <Button type="submit" size="lg" className="h-11 w-full">
               <Search className="size-4" />
               Find Media
             </Button>
