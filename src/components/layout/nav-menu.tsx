@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
@@ -10,6 +11,7 @@ import {
   Inbox,
   Plus,
   LayoutDashboard,
+  LogIn,
   LogOut,
   Map as MapIcon,
   Megaphone,
@@ -33,9 +35,12 @@ import { cn } from "@/lib/utils";
  * which is exactly what happened when the desktop bar simply hid its links on
  * small screens.
  *
- * The bar keeps Explore, How it works and About us on desktop. Everything else
- * — audience pages, map view, account destinations — lives here, and the bar
- * links are duplicated inside so nothing disappears below `md`.
+ * The mobile drawer is rendered through a PORTAL to document.body. The navbar
+ * that hosts this component has `backdrop-blur`, which establishes a
+ * containing block — so a `position: fixed` child resolves against the 64px
+ * header band rather than the viewport, clipping the drawer into the header
+ * and letting page content show through beside it. Portalling out is the fix;
+ * without it no amount of inset/z-index tuning behaves correctly.
  */
 
 interface MenuUser {
@@ -133,24 +138,20 @@ export function NavMenu({
         </Item>
       </Section>
 
-      <Section label="Theme">
-        <ThemeToggleInline />
-      </Section>
-
       {/*
-        Shown to everyone who is not already a partner. A partner sees their
-        dashboard instead — see the account section below.
+        Audience entry points. Shown to everyone — including signed-in
+        partners, who on desktop lose these to the dashboard button but on
+        mobile have room for both, and an advertiser may well also have media
+        to list.
       */}
-      {!isPartner && (
-        <Section label="Who it&rsquo;s for">
-          <Item href="/for-advertisers" icon={Megaphone} onNavigate={close}>
-            For advertisers
-          </Item>
-          <Item href="/for-media-partners" icon={Store} onNavigate={close}>
-            For media partners
-          </Item>
-        </Section>
-      )}
+      <Section label="Who it&rsquo;s for">
+        <Item href="/for-advertisers" icon={Megaphone} onNavigate={close}>
+          For advertisers
+        </Item>
+        <Item href="/for-media-partners" icon={Store} onNavigate={close}>
+          For media partners
+        </Item>
+      </Section>
 
       {user && (
         <Section label="Your account">
@@ -180,6 +181,10 @@ export function NavMenu({
           )}
         </Section>
       )}
+
+      <Section label="Theme">
+        <ThemeToggleInline />
+      </Section>
     </>
   );
 
@@ -205,16 +210,73 @@ export function NavMenu({
     <div className="flex flex-col gap-2">
       <Button asChild variant="secondary" className="w-full">
         <Link href="/signin" onClick={close}>
+          <LogIn className="size-4" aria-hidden="true" />
           Sign in
         </Link>
       </Button>
       <Button asChild className="w-full">
         <Link href="/partners/join" onClick={close}>
+          <Store className="size-4" aria-hidden="true" />
           Become a media partner
         </Link>
       </Button>
     </div>
   );
+
+  /**
+   * Portalled to document.body so `fixed` resolves against the viewport
+   * rather than the backdrop-blurred header — see the component doc comment.
+   *
+   * No `mounted` guard is needed: `open` only becomes true from a click, so
+   * document.body is guaranteed to exist by the time this renders.
+   */
+  const drawer =
+    open
+      ? createPortal(
+          <div
+            className="fixed inset-0 z-[60] md:hidden"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Navigation"
+          >
+            <button
+              type="button"
+              aria-label="Close menu"
+              onClick={close}
+              // Black rather than `bg-foreground/40`: --foreground is a LIGHT
+              // colour in dark mode, so that mixed a pale tint over the page
+              // instead of darkening it.
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm motion-safe:animate-[drawer-fade-in_160ms_ease-out]"
+            />
+
+            <div
+              id="primary-nav-menu"
+              className="absolute inset-y-0 right-0 flex w-[min(20rem,88vw)] flex-col border-l border-border bg-surface shadow-2xl motion-safe:animate-[drawer-slide-in_220ms_cubic-bezier(0.32,0.72,0,1)]"
+            >
+              <div className="flex h-16 shrink-0 items-center justify-between border-b border-border px-4">
+                {/* "Menu" here, not "More" — below md this drawer is the
+                    entire nav, not a secondary overflow of bar links. */}
+                <span className="font-semibold tracking-tight">Menu</span>
+                <button
+                  type="button"
+                  onClick={close}
+                  aria-label="Close menu"
+                  className="flex size-9 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground"
+                >
+                  <X className="size-5" />
+                </button>
+              </div>
+
+              <nav className="flex-1 overflow-y-auto p-3">{sections}</nav>
+
+              <div className="shrink-0 border-t border-border p-3">
+                {accountFooter}
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )
+      : null;
 
   return (
     <div ref={containerRef} className="relative">
@@ -241,52 +303,7 @@ export function NavMenu({
         <span className="hidden sm:inline">More</span>
       </button>
 
-      {/* Drawer — below md */}
-      {open && (
-        <div
-          className="fixed inset-0 z-50 md:hidden"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Navigation"
-        >
-          <button
-            type="button"
-            aria-label="Close menu"
-            onClick={close}
-            // A fixed black scrim, not `bg-foreground/40`: `--foreground` is
-            // a LIGHT colour in dark mode, so that combination mixed a pale
-            // tint over the page instead of darkening it — the backdrop read
-            // as barely-there instead of dimmed. Black at 55% darkens
-            // correctly in both themes.
-            className="absolute inset-0 bg-black/55 backdrop-blur-[1px]"
-          />
-
-          <div
-            id="primary-nav-menu"
-            className="absolute inset-y-0 right-0 flex w-[min(20rem,85vw)] flex-col border-l border-border-strong bg-surface shadow-2xl"
-          >
-            <div className="flex h-16 shrink-0 items-center justify-between border-b border-border px-4">
-              {/* "Menu" here, not "More" — below md this drawer is the
-                  entire nav, not a secondary overflow of bar links. */}
-              <span className="font-semibold tracking-tight">Menu</span>
-              <button
-                type="button"
-                onClick={close}
-                aria-label="Close menu"
-                className="flex size-9 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground"
-              >
-                <X className="size-5" />
-              </button>
-            </div>
-
-            <nav className="flex-1 overflow-y-auto p-3">{sections}</nav>
-
-            <div className="shrink-0 border-t border-border p-3">
-              {accountFooter}
-            </div>
-          </div>
-        </div>
-      )}
+      {drawer}
 
       {/* Floating dropdown — md and up */}
       {open && (

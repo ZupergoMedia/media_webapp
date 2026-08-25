@@ -259,3 +259,30 @@
 .maplibregl-ctrl-attrib {
   opacity: 0.6;
 }
+
+/*
+ * Mobile nav drawer entrance.
+ *
+ * Defined here rather than pulled from tailwindcss-animate, which this
+ * project does not install — the `animate-in`/`slide-in-from-*` classes used
+ * elsewhere in the codebase are silently inert for that reason. Both are
+ * applied under `motion-safe:` so they are skipped for anyone who has asked
+ * to reduce motion.
+ */
+@keyframes drawer-slide-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes drawer-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
