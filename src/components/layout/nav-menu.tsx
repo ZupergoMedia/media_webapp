@@ -62,6 +62,8 @@ export function NavMenu({
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  /** The portalled drawer root — see the outside-click handler below. */
+  const drawerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -81,10 +83,18 @@ export function NavMenu({
      * The mobile drawer has its own scrim, but the floating panel does not —
      * without this it would stay open while the user interacts with the page
      * behind it.
+     *
+     * `drawerRef` must be checked alongside `containerRef`: the drawer is
+     * portalled to document.body, so it is NOT a DOM descendant of the
+     * trigger's container. Without it, every tap inside the drawer counts as
+     * an outside click and closes the menu on pointerdown — before the tapped
+     * link's click event can fire, so navigation silently never happens.
      */
     const onPointerDown = (event: PointerEvent) => {
-      if (!containerRef.current) return;
-      if (!containerRef.current.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (containerRef.current?.contains(target)) return;
+      if (drawerRef.current?.contains(target)) return;
+      setOpen(false);
     };
 
     window.addEventListener("keydown", onKey);
@@ -234,6 +244,7 @@ export function NavMenu({
     open
       ? createPortal(
           <div
+            ref={drawerRef}
             className="fixed inset-0 z-[60] md:hidden"
             role="dialog"
             aria-modal="true"
@@ -246,12 +257,14 @@ export function NavMenu({
               // Black rather than `bg-foreground/40`: --foreground is a LIGHT
               // colour in dark mode, so that mixed a pale tint over the page
               // instead of darkening it.
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm motion-safe:animate-[drawer-fade-in_160ms_ease-out]"
+              className="absolute inset-0 z-0 bg-black/60 backdrop-blur-sm motion-safe:animate-[drawer-fade-in_160ms_ease-out]"
             />
 
             <div
               id="primary-nav-menu"
-              className="absolute inset-y-0 right-0 flex w-[min(20rem,88vw)] flex-col border-l border-border bg-surface shadow-2xl motion-safe:animate-[drawer-slide-in_220ms_cubic-bezier(0.32,0.72,0,1)]"
+              // z-10 over the scrim's z-0: they are siblings, and relying on
+              // paint order alone to keep the panel tappable is fragile.
+              className="absolute inset-y-0 right-0 z-10 flex w-[min(20rem,88vw)] flex-col border-l border-border bg-surface shadow-2xl motion-safe:animate-[drawer-slide-in_220ms_cubic-bezier(0.32,0.72,0,1)]"
             >
               <div className="flex h-16 shrink-0 items-center justify-between border-b border-border px-4">
                 {/* "Menu" here, not "More" — below md this drawer is the
