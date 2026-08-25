@@ -1,0 +1,160 @@
+@import "tailwindcss";
+
+/*
+ * ZuperGo design tokens.
+ *
+ * Deliberately restrained: a single confident brand hue, a neutral ramp with real
+ * contrast steps, and flat surfaces. No gradients, no glassmorphism, modest radii.
+ * The imagery (real inventory photos) should carry the visual weight, not the chrome.
+ */
+:root {
+  /*
+   * Ground: a warm sand off-white, not #ffffff.
+   *
+   * Pure white on a content-dense page like Explore — large flat light areas
+   * beside imagery — is the main cause of eye strain here. Warming it and
+   * dropping a few points of luminance removes the glare while keeping the
+   * page bright and premium rather than grey.
+   *
+   * --background and --surface stay distinct on purpose: that separation is
+   * what gives cards their lift now that neither is pure white.
+   */
+  --background: #f6f4ef;
+  --foreground: #191b21;
+
+  /* Surfaces */
+  --surface: #fffefb;
+  --surface-muted: #efece4;
+  --surface-sunken: #e5e1d6;
+
+  /*
+   * Brand: a deep indigo. Confident and technology-forward, and dark enough to
+   * carry white text on buttons at AA.
+   */
+  --brand: #2f43c4;
+  --brand-hover: #26379f;
+  --brand-subtle: #e9ebfa;
+  --brand-foreground: #ffffff;
+
+  /*
+   * Accent: teal.
+   *
+   * A second hue so the interface is not monochrome-plus-blue. Used for
+   * supporting emphasis — category chips, map markers, active states — never
+   * for primary actions, which stay indigo so "the blue thing" always means
+   * the same thing.
+   */
+  --accent: #0c6a66;
+  --accent-hover: #095350;
+  --accent-subtle: #e0f0ee;
+  --accent-foreground: #ffffff;
+
+  /* Highlight: warm amber, for featured badges and gentle emphasis. */
+  --highlight: #96560a;
+  --highlight-subtle: #fbeedb;
+
+  /* Text ramp — warmed so it sits naturally on the sand ground. */
+  --muted-foreground: #5a5d66;
+  --subtle-foreground: #86888f;
+
+  /* Lines — warm neutrals, so borders never read blue against the ground. */
+  --border: #e2ded3;
+  --border-strong: #c9c4b5;
+
+  /* Status */
+  --success: #12704e;
+  --success-subtle: #e2efe8;
+  --warning: #8f5d09;
+  --warning-subtle: #f9eeda;
+  --danger: #b33520;
+  --danger-subtle: #f9e8e4;
+
+  --ring: #2f43c4;
+
+  --radius-card: 0.75rem;
+  --radius-control: 0.5rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-surface-sunken: var(--surface-sunken);
+
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-subtle: var(--brand-subtle);
+  --color-brand-foreground: var(--brand-foreground);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-highlight: var(--highlight);
+  --color-highlight-subtle: var(--highlight-subtle);
+
+  --color-muted-foreground: var(--muted-foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
+
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+
+  --color-success: var(--success);
+  --color-success-subtle: var(--success-subtle);
+  --color-warning: var(--warning);
+  --color-warning-subtle: var(--warning-subtle);
+  --color-danger: var(--danger);
+  --color-danger-subtle: var(--danger-subtle);
+
+  --color-ring: var(--ring);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+
+  --radius-card: var(--radius-card);
+  --radius-control: var(--radius-control);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Tight, confident display type — marketplace, not brochure. */
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+/* Mapbox surfaces its own stylesheet; these overrides keep it on-brand. */
+.mapboxgl-popup-content {
+  padding: 0 !important;
+  border-radius: var(--radius-card) !important;
+  box-shadow: 0 8px 28px rgb(11 15 25 / 0.16) !important;
+  overflow: hidden;
+}
+
+.mapboxgl-popup-close-button {
+  display: none;
+}
+
+.mapboxgl-ctrl-logo,
+.mapboxgl-ctrl-attrib {
+  opacity: 0.6;
+}

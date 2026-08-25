@@ -1,0 +1,32 @@
+# Reproducible local Postgres + PostGIS.
+#
+# Neon is the primary development database (see .env.example), but this is
+# committed so the project can be brought up offline and so CI has a target.
+#
+#   docker compose up -d
+#   DATABASE_URL=postgresql://zupergo:zupergo@localhost:5432/zupergo
+#
+# The PostGIS *extension* is created by migration 0000_enable_postgis, never by
+# hand here — otherwise Neon branches and fresh Docker volumes drift apart.
+
+services:
+  postgres:
+    image: postgis/postgis:17-3.5
+    container_name: zupergo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: zupergo
+      POSTGRES_PASSWORD: zupergo
+      POSTGRES_DB: zupergo
+    ports:
+      - "5432:5432"
+    volumes:
+      - zupergo-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zupergo -d zupergo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  zupergo-pgdata:

@@ -1,0 +1,1619 @@
+// ZuperGo Media — data model
+//
+// Design notes that matter when reading this file:
+//
+//  * PostGIS geography columns are declared `Unsupported(...)`. Prisma can create
+//    and index them but cannot read or write them through the typed client, so
+//    every write touching them goes through src/server/db/spatial.ts. Denormalised
+//    `lat`/`lng` columns sit alongside so ordinary reads stay on the typed client.
+//
+//  * Asset specifications are JSONB, not a key/value table. AssetType.specSchema
+//    holds field descriptors that drive both the Add Asset wizard and runtime Zod
+//    validation, so new asset types need no code change.
+//
+//  * BookingItem.period is a tstzrange maintained by trigger, guarded by a GiST
+//    exclusion constraint. Double-booking is impossible at the database level,
+//    not merely checked in application code. See migration 0000.
+
+generator client {
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  extensions = [postgis]
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+/// Who a user is on the platform.
+///
+/// MEDIA_PARTNER rather than MEDIA_OWNER: the party listing inventory is often
+/// an agency, franchisee or manager acting for the owner, so "owner" would
+/// assert a relationship that frequently does not hold.
+enum UserRole {
+  ADVERTISER
+  MEDIA_PARTNER
+  ADMIN
+}
+
+/// Where an asset physically lives, and therefore how it is searched.
+/// FIXED/VENUE resolve to a point; AREA/MOBILE to polygons; ROUTE to a linestring.
+enum LocationMode {
+  FIXED
+  AREA
+  ROUTE
+  MOBILE
+  VENUE
+  EVENT
+}
+
+/// How inventory on an asset is sold. Every model normalises to a tstzrange for
+/// conflict detection; they differ only in how that range is derived.
+enum BookingModel {
+  FULL_ASSET
+  DATE_RANGE
+  TIME_SLOT
+  DIGITAL_SLOT
+  CAMPAIGN
+}
+
+/// How a media partner relates to the inventory they list.
+///
+/// Recorded because it changes what verification should check: an owner proves
+/// title, an agency proves its mandate to sell.
+enum PartnerType {
+  OWNER
+  AGENCY
+  MANAGER
+  OTHER
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  SUSPENDED
+}
+
+/// Listing lifecycle, distinct from verification. An asset can be VERIFIED but
+/// PAUSED by its owner, and only ACTIVE + VERIFIED assets are searchable.
+enum AssetStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+/// Lifecycle of an availability request.
+///
+/// ZuperGo does not own or control the inventory it lists, so submitting a
+/// request never reserves anything. An asset may already be sold through the
+/// owner's own channels, and only the owner can confirm.
+///
+///   REQUESTED  advertiser has asked; owner has not responded
+///   VIEWED     owner has opened the request (read receipt for the advertiser)
+///   CONFIRMED  owner has confirmed availability out-of-band — only now is the
+///              window actually claimed, and only now does the overlap
+///              constraint apply
+///   DECLINED   owner cannot fulfil it (commonly: already sold elsewhere)
+///   WITHDRAWN  advertiser cancelled their own request
+///   COMPLETED  campaign has run
+enum BookingStatus {
+  DRAFT
+  REQUESTED
+  VIEWED
+  CONFIRMED
+  DECLINED
+  WITHDRAWN
+  COMPLETED
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+enum CampaignStatus {
+  DRAFT
+  PLANNING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum PricingUnit {
+  PER_DAY
+  PER_WEEK
+  PER_MONTH
+  PER_SLOT
+  PER_SPOT
+  PER_IMPRESSION
+  PER_EVENT
+}
+
+/// Why a window is unavailable. BOOKED rows are derived from confirmed bookings;
+/// BLOCKED and MAINTENANCE are set by the owner.
+enum AvailabilityKind {
+  AVAILABLE
+  BLOCKED
+  BOOKED
+  MAINTENANCE
+}
+
+enum NotificationType {
+  BOOKING_REQUESTED
+  BOOKING_CONFIRMED
+  BOOKING_CANCELLED
+  ASSET_VERIFIED
+  ASSET_REJECTED
+  PAYMENT_RECEIVED
+  SYSTEM
+}
+
+enum IlluminationType {
+  NONE
+  BACKLIT
+  FRONTLIT
+  DIGITAL
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  phone         String?
+  image         String?
+  passwordHash  String?
+  role          UserRole  @default(ADVERTISER)
+  emailVerified DateTime?
+
+  mediaOwner     MediaOwner?
+  bookings       Booking[]
+  campaigns      Campaign[]
+  reviews        Review[]
+  favorites      Favorite[]
+  searchHistory  SearchHistory[]
+  notifications  Notification[]
+  reviewedAssets Verification[]  @relation("VerificationReviewer")
+  accounts       Account[]
+  sessions       Session[]
+
+  saleOffers               SaleOffer[]
+  saleListingVerifications SaleListingVerification[] @relation("SaleVerificationReviewer")
+  saleListingEvents        SaleListingEvent[]        @relation("SaleListingEventActor")
+  saleReportsFiled         SaleReport[]              @relation("SaleReportReporter")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([role])
+}
+
+/// Auth.js adapter tables. Kept minimal — only what the adapter requires.
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+/// A media partner: the business listing inventory.
+///
+/// Named MediaOwner for historical reasons — renaming the table would break
+/// every relation for no functional gain — but `partnerType` records that many
+/// are agencies or managers rather than owners.
+model MediaOwner {
+  id           String      @id @default(cuid())
+  userId       String      @unique
+  companyName  String
+  partnerType  PartnerType @default(OWNER)
+  slug         String      @unique
+  description  String?
+  logoUrl      String?
+  website      String?
+  contactName  String?
+  contactEmail String?
+  contactPhone String?
+
+  // Business identifiers — India-specific but nullable for global expansion.
+  gstNumber String?
+  panNumber String?
+
+  city    String?
+  state   String?
+  country String  @default("India")
+
+  verificationStatus VerificationStatus @default(PENDING)
+  verifiedAt         DateTime?
+
+  /// Standing specific to the sales module, deliberately separate from
+  /// `verificationStatus` above. Selling an asset outright is a materially
+  /// higher-trust act than listing it for advertising, so a partner verified
+  /// for one must be able to disagree with the other. Null means this partner
+  /// has never engaged with the sales module at all — distinct from having
+  /// engaged and been found UNVERIFIED.
+  saleVerificationStatus SellerVerificationStatus?
+  saleVerifiedAt         DateTime?
+
+  /// Denormalised rating rollup. Recomputed on review write; cheaper than
+  /// aggregating Review on every listing card render.
+  ratingAverage Float @default(0)
+  ratingCount   Int   @default(0)
+
+  user               User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assets             Asset[]
+  verifications      Verification[]
+  saleListings       SaleListing[]
+  saleReportsAgainst SaleReport[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([verificationStatus])
+  @@index([city])
+  @@index([saleVerificationStatus])
+}
+
+// ---------------------------------------------------------------------------
+// Taxonomy — database-driven so new media types need no deploy
+// ---------------------------------------------------------------------------
+
+model AssetCategory {
+  id          String  @id @default(cuid())
+  slug        String  @unique
+  name        String
+  description String?
+  icon        String?
+  sortOrder   Int     @default(0)
+  isActive    Boolean @default(true)
+
+  assetTypes AssetType[]
+  assets     Asset[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+}
+
+model AssetType {
+  id         String @id @default(cuid())
+  categoryId String
+  slug       String @unique
+  name       String
+
+  /// Default location mode for new assets of this type. Owners may override.
+  defaultLocationMode LocationMode @default(FIXED)
+
+  /// Booking models this type supports, e.g. a DOOH screen offers DIGITAL_SLOT
+  /// and DATE_RANGE. Drives which booking UI the detail page renders.
+  supportedBookingModels BookingModel[]
+
+  isDigital Boolean @default(false)
+  isMobile  Boolean @default(false)
+
+  /// Field descriptors (name, label, input, unit, required, options, min/max,
+  /// group, order) rendered by the Add Asset wizard and compiled into a Zod
+  /// schema at runtime. This is what keeps ~70 asset types out of the UI code.
+  specSchema Json @default("[]")
+
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
+  category AssetCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  assets   Asset[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([categoryId, isActive])
+  @@index([isDigital])
+  @@index([isMobile])
+}
+
+// ---------------------------------------------------------------------------
+// Assets
+// ---------------------------------------------------------------------------
+
+model Asset {
+  id         String @id @default(cuid())
+  slug       String @unique
+  ownerId    String
+  categoryId String
+  typeId     String
+
+  title       String
+  description String?
+
+  locationMode LocationMode
+  bookingModel BookingModel @default(DATE_RANGE)
+
+  status             AssetStatus        @default(DRAFT)
+  verificationStatus VerificationStatus @default(PENDING)
+
+  /// Spec values keyed by the descriptors on AssetType.specSchema.
+  specs Json @default("{}")
+
+  /// Audience reach estimates. Nullable because not every owner measures them.
+  dailyImpressions Int?
+  audienceProfile  String?
+
+  isFeatured Boolean @default(false)
+
+  ratingAverage Float @default(0)
+  ratingCount   Int   @default(0)
+
+  owner    MediaOwner    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  category AssetCategory @relation(fields: [categoryId], references: [id])
+  type     AssetType     @relation(fields: [typeId], references: [id])
+
+  location         AssetLocation?
+  images           AssetImage[]
+  pricing          AssetPricing[]
+  availability     AssetAvailability[]
+  digitalInventory DigitalInventory?
+  operatingAreas   OperatingArea[]
+  routes           Route[]
+  bookingItems     BookingItem[]
+  campaignAssets   CampaignAsset[]
+  reviews          Review[]
+  favorites        Favorite[]
+  verifications    Verification[]
+
+  /// One-to-many, not one-to-one: a withdrawn or expired sale listing leaves a
+  /// history row rather than being deleted, so an asset may have several over
+  /// time. Exactly one ACTIVE-lifecycle listing per asset is enforced by the
+  /// service layer (see SaleListing), not by the schema.
+  saleListings SaleListing[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  publishedAt DateTime?
+
+  // Composite index matching the primary search predicate: only ACTIVE +
+  // VERIFIED assets are searchable, then narrowed by taxonomy.
+  @@index([status, verificationStatus])
+  @@index([categoryId, typeId])
+  @@index([ownerId])
+  @@index([isFeatured])
+}
+
+model AssetLocation {
+  id      String @id @default(cuid())
+  assetId String @unique
+
+  /// Source of truth for all spatial queries. Written only via raw SQL.
+  geog Unsupported("geography(Point, 4326)")?
+
+  /// Denormalised copies of `geog` so list rendering and map pins avoid a raw
+  /// query. Kept in sync by the same write path that sets `geog`.
+  lat Float?
+  lng Float?
+
+  addressLine String?
+  landmark    String?
+  locality    String?
+  city        String
+  state       String
+  country     String  @default("India")
+  pincode     String?
+
+  /// Free-text area label for AREA-mode assets that have no single point.
+  areaLabel String?
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([city])
+  @@index([locality])
+}
+
+model AssetImage {
+  id        String  @id @default(cuid())
+  assetId   String
+  url       String
+  alt       String?
+  width     Int?
+  height    Int?
+  sortOrder Int     @default(0)
+  isPrimary Boolean @default(false)
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([assetId, sortOrder])
+}
+
+/// Optional normalised mirror of high-value spec fields. The authoritative store
+/// is Asset.specs (JSONB); rows here exist only for fields worth indexing or
+/// displaying in a stable order on the detail page.
+model AssetSpecification {
+  id        String  @id @default(cuid())
+  assetId   String
+  key       String
+  label     String
+  value     String
+  unit      String?
+  group     String?
+  sortOrder Int     @default(0)
+
+  @@unique([assetId, key])
+  @@index([assetId])
+}
+
+model AssetPricing {
+  id      String @id @default(cuid())
+  assetId String
+
+  unit     PricingUnit
+  /// Stored in paise/cents to avoid float drift on money.
+  amount   Int
+  currency String      @default("INR")
+
+  minDuration Int?
+  maxDuration Int?
+
+  /// Optional volume discount, e.g. 10% off bookings over 30 days.
+  discountThreshold Int?
+  discountPercent   Int?
+
+  isDefault Boolean @default(false)
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([assetId, unit])
+  @@index([assetId, isDefault])
+}
+
+/// Owner-declared availability windows and blackouts. Bookings subtract from
+/// these; the booking engine treats absence of an AVAILABLE row as bookable by
+/// default so owners need not enumerate every open day.
+model AssetAvailability {
+  id      String @id @default(cuid())
+  assetId String
+
+  kind      AvailabilityKind @default(BLOCKED)
+  startDate DateTime
+  endDate   DateTime
+  note      String?
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([assetId, startDate, endDate])
+}
+
+/// DOOH slot economics. Present only for digital assets. Capacity here is what
+/// the booking engine counts against for DIGITAL_SLOT conflicts.
+model DigitalInventory {
+  id      String @id @default(cuid())
+  assetId String @unique
+
+  slotDurationSeconds Int
+  loopDurationSeconds Int
+  slotsPerLoop        Int
+  operatingHoursStart Int @default(6)
+  operatingHoursEnd   Int @default(23)
+
+  /// Derived and stored so search can filter/sort on it without recomputation.
+  estimatedPlaysPerDay Int?
+
+  screenWidthPx  Int?
+  screenHeightPx Int?
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Service area for MOBILE/AREA assets — a polygon, or a point plus radius.
+/// This is why a single point column is insufficient for the search query.
+model OperatingArea {
+  id      String @id @default(cuid())
+  assetId String
+
+  name String
+  city String?
+
+  /// Polygon service area. Written via raw SQL.
+  area Unsupported("geography(Polygon, 4326)")?
+
+  /// Radius fallback for owners who give a centre point instead of a polygon.
+  centerLat    Float?
+  centerLng    Float?
+  radiusMeters Int?
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([assetId])
+  @@index([city])
+}
+
+/// Fixed path for ROUTE-mode assets such as bus routes.
+model Route {
+  id      String @id @default(cuid())
+  assetId String
+
+  name        String
+  description String?
+
+  /// LineString path. Written via raw SQL.
+  path Unsupported("geography(LineString, 4326)")?
+
+  startLabel String?
+  endLabel   String?
+  lengthKm   Float?
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([assetId])
+}
+
+// ---------------------------------------------------------------------------
+// Booking
+// ---------------------------------------------------------------------------
+
+model Booking {
+  id           String  @id @default(cuid())
+  reference    String  @unique
+  advertiserId String
+  campaignId   String?
+
+  status BookingStatus @default(DRAFT)
+
+  /// Denormalised money rollup over BookingItem, in paise.
+  subtotalAmount Int    @default(0)
+  taxAmount      Int    @default(0)
+  totalAmount    Int    @default(0)
+  currency       String @default("INR")
+
+  /// When the owner last responded, if at all. Drives "awaiting response for
+  /// N days" prompts rather than any kind of automatic expiry — nothing is
+  /// held, so nothing needs releasing.
+  respondedAt DateTime?
+
+  notes         String?
+  creativeNotes String?
+  /// Owner's reason when declining — shown to the advertiser, so it must be
+  /// written for them rather than as an internal note.
+  declineReason String?
+  confirmedAt   DateTime?
+  declinedAt    DateTime?
+
+  /// How the owner will follow up. Captured at request time because the
+  /// confirmation happens off-platform.
+  contactEmail String?
+  contactPhone String?
+
+  advertiser User          @relation(fields: [advertiserId], references: [id])
+  campaign   Campaign?     @relation(fields: [campaignId], references: [id])
+  items      BookingItem[]
+  payments   Payment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([advertiserId, status])
+  @@index([status, createdAt])
+  @@index([campaignId])
+}
+
+/// One asset-and-window line on a booking. `period` is a generated tstzrange
+/// maintained by trigger and guarded by a GiST exclusion constraint — see
+/// migration 0000. This single mechanism covers all five booking models.
+model BookingItem {
+  id        String @id @default(cuid())
+  bookingId String
+  assetId   String
+
+  bookingModel BookingModel
+
+  startAt DateTime
+  endAt   DateTime
+
+  /// DIGITAL_SLOT only: how many slots per loop this line reserves. Digital
+  /// assets allow overlap up to DigitalInventory.slotsPerLoop, so they are
+  /// excluded from the exclusion constraint and checked by capacity instead.
+  slotCount Int?
+
+  unitPrice Int
+  quantity  Int    @default(1)
+  lineTotal Int
+  currency  String @default("INR")
+
+  /// True only once the media owner has CONFIRMED the request.
+  ///
+  /// Derived from Booking.status by trigger — do not write from application
+  /// code. Exists because an exclusion constraint's WHERE clause must be
+  /// IMMUTABLE and so cannot subquery Booking.
+  ///
+  /// Deliberately excludes REQUESTED: competing advertisers may request the
+  /// same asset and window, and the owner chooses between them. Blocking dates
+  /// on an unconfirmed request would sterilise inventory ZuperGo does not
+  /// control. See migration 0002.
+  holdsInventory Boolean @default(false)
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  asset   Asset   @relation(fields: [assetId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([assetId, startAt, endAt])
+  @@index([bookingId])
+}
+
+// ---------------------------------------------------------------------------
+// Campaigns
+// ---------------------------------------------------------------------------
+
+model Campaign {
+  id           String @id @default(cuid())
+  advertiserId String
+
+  name        String
+  brandName   String?
+  description String?
+
+  status CampaignStatus @default(DRAFT)
+
+  startDate DateTime?
+  endDate   DateTime?
+
+  budgetAmount Int?
+  currency     String @default("INR")
+
+  targetLocations String[] @default([])
+  targetAudience  String?
+  creativeNotes   String?
+
+  advertiser User            @relation(fields: [advertiserId], references: [id], onDelete: Cascade)
+  assets     CampaignAsset[]
+  bookings   Booking[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([advertiserId, status])
+}
+
+model CampaignAsset {
+  id         String @id @default(cuid())
+  campaignId String
+  assetId    String
+
+  startDate DateTime?
+  endDate   DateTime?
+  notes     String?
+
+  /// Price snapshot at add-time, so campaign totals stay stable if the owner
+  /// later changes their rate card.
+  estimatedCost Int?
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  asset    Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([campaignId, assetId])
+  @@index([assetId])
+}
+
+// ---------------------------------------------------------------------------
+// Payments, trust and engagement
+// ---------------------------------------------------------------------------
+
+/// Gateway-shaped even though only a mock provider exists today, so Stripe or
+/// Razorpay drops in without touching callers.
+model Payment {
+  id        String @id @default(cuid())
+  bookingId String
+
+  provider      String        @default("mock")
+  providerRef   String?
+  status        PaymentStatus @default(PENDING)
+  amount        Int
+  currency      String        @default("INR")
+  failureReason String?
+  metadata      Json?
+
+  paidAt DateTime?
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([bookingId])
+  @@index([status])
+}
+
+model Review {
+  id       String @id @default(cuid())
+  assetId  String
+  authorId String
+
+  rating  Int
+  title   String?
+  comment String?
+
+  asset  Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  author User  @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([assetId, authorId])
+  @@index([assetId])
+}
+
+/// Audit trail for admin moderation. Polymorphic over asset and owner: exactly
+/// one of assetId/ownerId is set.
+model Verification {
+  id         String  @id @default(cuid())
+  assetId    String?
+  ownerId    String?
+  reviewerId String?
+
+  status    VerificationStatus @default(PENDING)
+  notes     String?
+  documents Json?
+
+  reviewedAt DateTime?
+
+  asset    Asset?      @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  owner    MediaOwner? @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  reviewer User?       @relation("VerificationReviewer", fields: [reviewerId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([assetId])
+  @@index([ownerId])
+}
+
+model Notification {
+  id      String           @id @default(cuid())
+  userId  String
+  type    NotificationType
+  title   String
+  body    String?
+  linkUrl String?
+  readAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, readAt])
+}
+
+model Favorite {
+  id      String @id @default(cuid())
+  userId  String
+  assetId String
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, assetId])
+  @@index([assetId])
+}
+
+model SearchHistory {
+  id     String  @id @default(cuid())
+  userId String?
+
+  query       String?
+  filters     Json?
+  city        String?
+  resultCount Int?
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Asset sales — a separate transaction from advertising
+//
+// Advertising lets someone rent space on an asset; this lets a media partner
+// sell the asset itself (or the rights they hold in it) outright. Different
+// counterparties, different lifecycle, different disclosure rules — so this
+// gets its own enum family and its own status/verification vocabulary rather
+// than overloading VerificationStatus/AssetStatus, which existing code
+// switches on exhaustively.
+//
+// The central domain fact shaping every model below: the seller frequently
+// owns neither the land nor the physical structure. A hoarding vendor may
+// hold nothing but a multi-year advertising right granted by a building
+// society. OwnershipDetails, RightsDetails and PropertyDetails are kept
+// distinct so the platform never implies a title that does not exist.
+// ---------------------------------------------------------------------------
+
+/// What kind of transaction a listing offers.
+///
+/// One value today. Exists so that leasing, auctions and revenue-share
+/// offerings become an ALTER TYPE plus a nullable terms table later, rather
+/// than a rename of this model — a generic parent `Listing` table would have
+/// imposed a join on every read today to buy that same additivity.
+enum SaleListingKind {
+  SALE
+}
+
+/// Lifecycle of a sale listing.
+///
+/// Only PUBLISHED is public. Everything else — including SALE_AGREED and
+/// SOLD — is visible to the seller and admins only: a sold price is
+/// commercially sensitive, and a withdrawn listing must not keep drawing
+/// enquiries.
+enum SaleListingStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  PUBLISHED
+  PAUSED
+  OFFER_RECEIVED
+  UNDER_NEGOTIATION
+  SALE_AGREED
+  SOLD
+  WITHDRAWN
+  REJECTED
+  EXPIRED
+}
+
+/// How the seller holds the thing they are selling.
+///
+/// Recorded because "owned" and "a three-year advertising right" are not
+/// interchangeable claims, and the platform must never blur them.
+enum SaleOwnershipType {
+  FREEHOLD_OWNED
+  LEASED
+  LONG_TERM_LEASE
+  SUB_LEASE
+  CONCESSION
+  LICENSE
+  ADVERTISING_RIGHTS
+  OPERATING_RIGHTS
+  GOVERNMENT_TENDER
+  REVENUE_SHARE
+  PARTNERSHIP_JV
+  OTHER
+}
+
+/// What the buyer actually receives. Multi-select, stored as an array —
+/// AssetType.supportedBookingModels already establishes enum arrays as
+/// idiomatic here. A child table would add a join to every listing card for
+/// no integrity gain, since the enum itself is the constraint; this stays
+/// filterable via Prisma's `has`/`hasSome` against a GIN index.
+enum SaleInclusion {
+  PHYSICAL_STRUCTURE
+  ADVERTISING_RIGHTS
+  LAND_RIGHTS
+  LEASE_RIGHTS
+  CONCESSION_RIGHTS
+  OPERATING_RIGHTS
+  CUSTOMER_CONTRACTS
+  DIGITAL_DISPLAY_EQUIPMENT
+  ELECTRICAL_INFRASTRUCTURE
+  BRANDING_SIGNAGE_RIGHTS
+  OTHER
+}
+
+/// How precisely a listing's position is exposed publicly.
+///
+/// Defaults to APPROXIMATE (see SaleListing.locationPrecision) so a seller who
+/// never touches the setting is not silently publishing exact coordinates.
+enum SaleLocationPrecision {
+  EXACT
+  APPROXIMATE
+}
+
+/// Whether a published listing still matches the asset it was cut from.
+///
+/// Drift is flagged, never auto-applied: a buyer evaluating a 40x20 hoarding
+/// must not have it silently become 20x10 because the seller edited the
+/// underlying asset for an unrelated advertising reason.
+enum SaleListingSyncState {
+  IN_SYNC
+  DRIFTED
+  RESYNC_REQUESTED
+}
+
+/// How far a seller has progressed through sales-specific vetting.
+///
+/// Deliberately not VerificationStatus — selling is a higher-trust act than
+/// listing for advertising, so the two must be able to disagree. Lives on
+/// MediaOwner as a nullable column; null means never engaged with the sales
+/// module, distinct from having engaged and been found UNVERIFIED.
+enum SellerVerificationStatus {
+  UNVERIFIED
+  BASIC_VERIFIED
+  DOCUMENTS_SUBMITTED
+  DOCUMENTS_UNDER_REVIEW
+  VERIFIED_SELLER
+}
+
+/// How far a listing has progressed through admin review.
+enum ListingVerificationStatus {
+  UNVERIFIED
+  DOCUMENTS_SUBMITTED
+  UNDER_REVIEW
+  VERIFIED
+  REJECTED
+}
+
+/// One line item of the admin review checklist.
+///
+/// An enum rather than free text: drift handling maps a changed asset field
+/// onto the checklist item it invalidates (a spec change reopens
+/// STRUCTURAL_DOCUMENTS, a location change reopens LOCATION), and that
+/// mapping has to be code, not a string comparison.
+enum SaleVerificationItem {
+  SELLER_IDENTITY
+  ASSET_OWNERSHIP_OR_RIGHT
+  LAND_LEASE_RELATIONSHIP
+  ADVERTISING_PERMISSION
+  PERMIT_VALIDITY
+  STRUCTURAL_DOCUMENTS
+  SALE_RIGHTS
+  EXISTING_CONTRACTS
+  LOCATION
+  PHOTOGRAPHS
+}
+
+/// Outcome of one checklist item.
+///
+/// NOT_APPLICABLE is load-bearing and distinct from NOT_VERIFIED: a painted
+/// wall has no structural stability certificate to check, and marking that
+/// "not verified" would misreport a complete review as incomplete.
+enum VerificationCheckStatus {
+  VERIFIED
+  NOT_VERIFIED
+  NOT_APPLICABLE
+  NEEDS_MORE_INFO
+}
+
+/// Kinds of permit or permission a site may need.
+///
+/// Requirements vary by asset type, municipality, and proximity to a highway,
+/// railway or airport, so none of these is globally mandatory — the admin
+/// checklist judges whether the set present is adequate for a given site.
+enum PermitType {
+  MUNICIPAL_ADVERTISING_PERMIT
+  HOARDING_PERMIT
+  STRUCTURAL_STABILITY_CERTIFICATE
+  LAND_OWNER_NOC
+  PROPERTY_OWNER_NOC
+  TRAFFIC_AUTHORITY_NOC
+  HIGHWAY_AUTHORITY_PERMISSION
+  RAILWAY_METRO_PERMISSION
+  AIRPORT_AUTHORITY_PERMISSION
+  FIRE_SAFETY_APPROVAL
+  ELECTRICAL_APPROVAL
+  ENVIRONMENTAL_APPROVAL
+  GOVERNMENT_CONCESSION_DOC
+  OTHER
+}
+
+/// Seller-declared state of a permit.
+///
+/// NOT_AVAILABLE ("this site needs one and we do not have it") and
+/// NOT_APPLICABLE ("this site does not need one") are kept distinct on
+/// purpose — collapsing them would hide a real compliance gap behind a value
+/// that also covers sites with nothing to comply with.
+enum PermitStatus {
+  VALID
+  EXPIRED
+  PENDING_RENEWAL
+  NOT_AVAILABLE
+  NOT_APPLICABLE
+}
+
+/// Broad grouping of a declared document, matching the product taxonomy
+/// (ownership / permissions / technical / commercial / other). Kept coarse —
+/// the specific claim lives in SaleDocument.title / documentType free text —
+/// because this only drives which UI section a document renders under.
+enum SaleDocumentCategory {
+  OWNERSHIP
+  PERMISSIONS
+  TECHNICAL
+  COMMERCIAL
+  OTHER
+}
+
+/// Who may see a declared document's metadata.
+///
+/// Governs visibility of the *metadata about* a document — there is no file
+/// to gate, since documents here are seller-declared claims, not uploads (see
+/// SaleDocument). PUBLIC is safe only for coarse facts (document type,
+/// validity); document numbers and counterpart names must never be PUBLIC —
+/// enforced in the service layer's allow-list, not by this enum alone.
+enum SaleDocumentVisibility {
+  PUBLIC
+  BUYER_ON_REQUEST
+  VERIFIED_BUYER_ONLY
+  ADMIN_ONLY
+}
+
+/// Why a public visitor is enquiring. Shapes how the seller triages their inbox.
+enum SaleEnquirerInterest {
+  INVESTOR
+  MEDIA_COMPANY
+  ADVERTISER
+  PROPERTY_OWNER
+  BROKER
+  OTHER
+}
+
+/// What the enquirer is asking for. Multi-select.
+enum SaleEnquiryIntent {
+  MORE_INFORMATION
+  REQUEST_DOCUMENTS
+  REQUEST_SITE_VISIT
+  MAKE_OFFER
+  CONTACT_SELLER
+}
+
+/// Lifecycle of one enquiry as the seller works through their inbox.
+enum SaleEnquiryStatus {
+  NEW
+  VIEWED
+  RESPONDED
+  CLOSED
+}
+
+/// Lifecycle of a buyer's offer.
+///
+/// ACCEPTED is deliberately not a transfer of ownership — see
+/// SaleOffer.status doc comment. ZuperGo is a marketplace, not a party to
+/// the sale, and neither escrows funds nor conveys rights.
+enum SaleOfferStatus {
+  SUBMITTED
+  VIEWED
+  COUNTER_OFFER
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+  EXPIRED
+}
+
+/// What happened in the life of a sale listing. A closed set so the common
+/// questions ("when did this go from 50L to 45L", "who published it") stay
+/// answerable from typed columns rather than by parsing a payload.
+enum SaleListingEventType {
+  CREATED
+  SUBMITTED
+  PUBLISHED
+  STATUS_CHANGED
+  PRICE_CHANGED
+  SNAPSHOT_UPDATED
+  DRIFT_DISMISSED
+  DOCUMENT_ADDED
+  DOCUMENT_REMOVED
+  PERMIT_ADDED
+  VERIFICATION_DECISION
+  ENQUIRY_RECEIVED
+  OFFER_RECEIVED
+  OFFER_STATUS_CHANGED
+  REPORTED
+  WITHDRAWN
+}
+
+/// What a report concerns. Exactly one of SaleReport.saleListingId /
+/// reportedOwnerId is set, matching the existing Verification model's
+/// polymorphic-over-two-things pattern.
+enum SaleReportReason {
+  MISLEADING_INFORMATION
+  SUSPECTED_FRAUD
+  DUPLICATE_LISTING
+  ALREADY_SOLD
+  INAPPROPRIATE_CONTENT
+  OTHER
+}
+
+/// A media partner's offer to sell an existing Asset.
+///
+/// Deliberately its own model rather than a status on Asset: selling and
+/// advertising are different transactions with different counterparties and
+/// disclosure rules, and an asset can stop being for sale (withdrawn, sold,
+/// rejected) while remaining perfectly bookable for advertising throughout.
+///
+/// Ownership/rights and financials are kept inline here rather than split
+/// into 1:1 child tables — they are always selected, always the headline of
+/// the listing card and detail page, so a table would add a join for no
+/// integrity gain. Contrast with PropertyDetails below, which IS split out,
+/// because it is mostly private fields and separation there is a privacy
+/// boundary the type system enforces.
+model SaleListing {
+  id      String @id @default(cuid())
+  assetId String
+  ownerId String
+
+  /// Sale-specific slug, distinct from Asset.slug. Generation MUST reject any
+  /// value colliding with an AssetType.slug — that single invariant is what
+  /// makes the public catch-all route ([...segments]) unambiguous forever:
+  /// segment 2 under a city is either a known AssetType slug (a landing page)
+  /// or a listing slug, and never both.
+  slug String @unique
+
+  listingKind SaleListingKind   @default(SALE)
+  status      SaleListingStatus @default(DRAFT)
+
+  // ---------------------------------------------------------------------
+  // Commercial terms
+  // ---------------------------------------------------------------------
+
+  /// Paise, matching every other money column in this schema.
+  askingPriceAmount Int
+  currency          String  @default("INR")
+  negotiable        Boolean @default(false)
+
+  /// Every financial field below is optional, and null means "not disclosed
+  /// by seller" — never coerced to 0. A seller who declares zero monthly
+  /// revenue (e.g. a newly-installed, not-yet-let asset) must be able to say
+  /// so distinctly from declining to answer, so 0 is a real, meaningful value
+  /// wherever it would be.
+  currentMonthlyRevenue       Int?
+  currentAnnualRevenue        Int?
+  averageOccupancyPercent     Int?
+  averageMonthlyAdIncome      Int?
+  operatingExpensesAnnual     Int?
+  annualMaintenanceCost       Int?
+  landRentAnnual              Int?
+  permitFeesAnnual            Int?
+  netAnnualIncome             Int?
+  expectedRoiPercent          Int?
+  existingAdvertiserContracts String?
+  remainingContractMonths     Int?
+
+  // ---------------------------------------------------------------------
+  // Ownership & rights
+  // ---------------------------------------------------------------------
+
+  ownershipType  SaleOwnershipType
+  /// What the buyer actually receives — see SaleInclusion doc comment.
+  inclusions     SaleInclusion[]
+  inclusionsNote String?
+
+  leaseStartDate     DateTime?
+  leaseEndDate       DateTime?
+  leaseRenewalTerms  String?
+  rightsTransferable Boolean?
+
+  // ---------------------------------------------------------------------
+  // Location privacy
+  //
+  // publicLat/publicLng/publicGeog are computed ONCE, at publish time, by
+  // src/server/db/sale-spatial.ts — never per request. Per-request jitter
+  // with zero mean converges on the true point at O(1/sqrt(N)) over repeated
+  // API calls; a persisted, deterministic public point instead means N
+  // requests reveal exactly what 1 request reveals. No public read path may
+  // ever select AssetLocation.geog/lat/lng directly for a sale listing —
+  // that invariant is what this column set exists to make grep-verifiable.
+  // ---------------------------------------------------------------------
+
+  locationPrecision SaleLocationPrecision @default(APPROXIMATE)
+
+  publicGeog      Unsupported("geography(Point, 4326)")?
+  publicLat       Float?
+  publicLng       Float?
+  publicAreaLabel String?
+  publicLocality  String?
+  publicCity      String?
+  publicState     String?
+
+  // ---------------------------------------------------------------------
+  // Snapshot & sync
+  //
+  // A published listing must not silently change when the underlying Asset
+  // is edited for an unrelated (usually advertising) reason. These columns
+  // freeze what a buyer is evaluating; syncState/driftedFields below record
+  // when the live Asset has since diverged, for the seller to explicitly
+  // accept or dismiss. See the AFTER UPDATE trigger on Asset in the migration.
+  // ---------------------------------------------------------------------
+
+  snapshotTitle            String?
+  snapshotDescription      String?
+  snapshotCategoryId       String?
+  snapshotTypeId           String?
+  snapshotTypeName         String?
+  snapshotSpecs            Json?
+  snapshotCity             String?
+  snapshotState            String?
+  snapshotLocality         String?
+  /// Ordered image URLs, copied as plain strings rather than AssetImage FKs —
+  /// if the seller later deletes a photo from the asset, the published
+  /// listing must keep showing what the buyer actually saw.
+  snapshotImageUrls        String[]  @default([])
+  snapshotDailyImpressions Int?
+  /// sha256 over the canonicalised snapshot payload, used to detect drift
+  /// without re-diffing every field on every read.
+  snapshotHash             String?
+  snapshotAt               DateTime?
+
+  syncState       SaleListingSyncState @default(IN_SYNC)
+  driftedFields   String[]             @default([])
+  driftDetectedAt DateTime?
+
+  // ---------------------------------------------------------------------
+  // SEO
+  // ---------------------------------------------------------------------
+
+  seoTitle        String?
+  metaDescription String?
+  ogImageUrl      String?
+
+  // ---------------------------------------------------------------------
+  // Fraud / duplicate detection
+  //
+  // Not a separate table with a background job — a derived, indexed column
+  // is always current, whereas a job-populated table is stale the moment a
+  // listing is edited. The admin queue runs
+  // `GROUP BY duplicateSignature HAVING COUNT(*) > 1`.
+  // ---------------------------------------------------------------------
+
+  duplicateSignature String?
+  duplicateOfId      String?
+  duplicateOf        SaleListing?  @relation("SaleListingDuplicate", fields: [duplicateOfId], references: [id])
+  duplicateFlaggedBy SaleListing[] @relation("SaleListingDuplicate")
+
+  publishedAt DateTime?
+  withdrawnAt DateTime?
+  soldAt      DateTime?
+
+  asset Asset      @relation(fields: [assetId], references: [id])
+  owner MediaOwner @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  propertyDetails SalePropertyDetails?
+  permits         SalePermit[]
+  documents       SaleDocument[]
+  enquiries       SaleEnquiry[]
+  offers          SaleOffer[]
+  verifications   SaleListingVerification[]
+  events          SaleListingEvent[]
+  reports         SaleReport[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Mirrors the existing Asset_searchable_idx pattern: only PUBLISHED
+  // listings are ever visible publicly, so this partial index carries the
+  // full public browse/filter query.
+  @@index([status, listingKind])
+  @@index([ownerId])
+  @@index([assetId])
+  @@index([publicCity])
+  @@index([duplicateSignature])
+}
+
+/// Land/property information, split into its own table as a privacy
+/// boundary the type system enforces: the public listing read path never
+/// includes this relation, so it is structurally incapable of leaking these
+/// columns. Inlined onto SaleListing, one careless `findUnique` without an
+/// explicit `select` would ship landOwnerName to an anonymous visitor —
+/// splitting it means that mistake cannot compile into a public response.
+///
+/// The seller may not own this land at all (see SaleListing.ownershipType);
+/// these fields describe whatever relationship exists, private or not.
+model SalePropertyDetails {
+  id            String @id @default(cuid())
+  saleListingId String @unique
+
+  propertyOwnershipType String?
+  landOwnerRelationship String?
+  /// Private. Never included in a public serialiser.
+  landOwnerName         String?
+  propertyAddress       String?
+  /// Survey/Gat/Plot number. Private — identifies the exact parcel.
+  surveyNumber          String?
+  buildingName          String?
+  floorLocation         String?
+  propertyType          String?
+
+  leaseStartDate      DateTime?
+  leaseEndDate        DateTime?
+  monthlyLandRent     Int?
+  annualLandRent      Int?
+  revenueSharePercent Int?
+  renewalTerms        String?
+
+  saleListing SaleListing @relation(fields: [saleListingId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// One municipal/authority permission relevant to the site. Many per
+/// listing, none globally mandatory — requirements vary by asset type,
+/// municipality, and proximity to a highway, railway or airport.
+model SalePermit {
+  id            String @id @default(cuid())
+  saleListingId String
+
+  permitType      PermitType
+  permitTypeOther String?
+
+  documentNumber   String?
+  issuingAuthority String?
+  issueDate        DateTime?
+  expiryDate       DateTime?
+  status           PermitStatus @default(NOT_AVAILABLE)
+
+  notes String?
+
+  saleListing SaleListing @relation(fields: [saleListingId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([saleListingId])
+  @@index([status])
+}
+
+/// A seller-DECLARED claim that a supporting document exists — not the
+/// document itself. This codebase has no file upload, and legal documents
+/// (title deeds, permits) are too sensitive to hold as pasted public URLs
+/// the way AssetImage does for photographs. `url` stays nullable and unused
+/// in this phase; documents change hands off-platform, matching how booking
+/// confirmation already works on the advertising side. Admin verification
+/// (SaleListingVerification) is what turns a claim into a confirmed fact —
+/// this table only ever records the claim.
+model SaleDocument {
+  id            String @id @default(cuid())
+  saleListingId String
+
+  category     SaleDocumentCategory
+  documentType String
+  title        String?
+
+  /// Private. Identifies a specific instrument; must never be PUBLIC.
+  documentNumber   String?
+  issuingAuthority String?
+  issueDate        DateTime?
+  expiryDate       DateTime?
+
+  visibility SaleDocumentVisibility @default(ADMIN_ONLY)
+
+  /// Unused placeholder for a future real document store (object storage +
+  /// presigned URLs + access audit). Do not write to this column until that
+  /// exists — a half-built document store serving a title deed from a
+  /// guessable URL is worse than no document store.
+  url String?
+
+  saleListing SaleListing @relation(fields: [saleListingId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([saleListingId])
+  @@index([visibility])
+}
+
+/// A public enquiry about a listing. Anonymous by design — the product
+/// requirement is that browsing AND enquiring need no login. Contact details
+/// are collected here but never returned by the submitting request, and
+/// never surfaced to any party but the seller/admin: the whole point of an
+/// enquiry (rather than exposing the seller's phone/email on the listing) is
+/// that the seller chooses whether to respond.
+model SaleEnquiry {
+  id            String @id @default(cuid())
+  saleListingId String
+
+  name    String
+  email   String
+  phone   String?
+  company String?
+
+  interest SaleEnquirerInterest
+  /// Multi-select — "more info" and "request site visit" are not exclusive.
+  intents  SaleEnquiryIntent[]
+  message  String?
+
+  /// Salted hash of the submitting IP (see SALE_ENQUIRY_IP_SALT), used only
+  /// for the rate-limit checks in createSaleEnquiry. Salted and hashed so
+  /// this table is never a plaintext IP log.
+  ipHash String?
+
+  status      SaleEnquiryStatus @default(NEW)
+  respondedAt DateTime?
+
+  saleListing SaleListing @relation(fields: [saleListingId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([saleListingId, status])
+  @@index([email, createdAt])
+  @@index([ipHash, createdAt])
+}
+
+/// A buyer's offer on a listing. Unlike SaleEnquiry, this requires a session
+/// — an offer asserts financial intent and starts a negotiation, which an
+/// anonymous, unenforceable submission cannot meaningfully do.
+model SaleOffer {
+  id            String @id @default(cuid())
+  saleListingId String
+  buyerId       String
+
+  /// Paise.
+  offerPriceAmount        Int
+  currency                String  @default("INR")
+  message                 String?
+  expectedClosingTimeline String?
+
+  /// ACCEPTED records that the seller has agreed to these terms — it is
+  /// explicitly NOT a transfer of ownership. ZuperGo neither escrows funds
+  /// nor conveys rights; the actual transaction happens between the parties
+  /// under whatever agreement/law applies. Every surface displaying an
+  /// accepted offer must carry that disclaimer (see SaleDisclaimer).
+  status SaleOfferStatus @default(SUBMITTED)
+
+  viewedAt    DateTime?
+  respondedAt DateTime?
+
+  saleListing SaleListing @relation(fields: [saleListingId], references: [id], onDelete: Cascade)
+  buyer       User        @relation(fields: [buyerId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([saleListingId, status])
+  @@index([buyerId])
+}
+
+/// One admin review pass over a listing. Append-only, same spirit as the
+/// existing Verification model — a new pass is a new row, not an overwrite,
+/// so the history of decisions survives. Kept separate from Verification
+/// (rather than reusing its polymorphic assetId/ownerId shape) because sale
+/// review needs its own status vocabulary and a checklist child table that
+/// would otherwise sit empty on every advertising-side verification row.
+model SaleListingVerification {
+  id            String  @id @default(cuid())
+  saleListingId String
+  reviewerId    String?
+
+  status ListingVerificationStatus @default(UNVERIFIED)
+  notes  String?
+
+  reviewedAt DateTime?
+
+  saleListing SaleListing             @relation(fields: [saleListingId], references: [id], onDelete: Cascade)
+  reviewer    User?                   @relation("SaleVerificationReviewer", fields: [reviewerId], references: [id])
+  checks      SaleVerificationCheck[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([saleListingId])
+  @@index([status])
+}
+
+/// One line of the admin checklist for a given review pass.
+model SaleVerificationCheck {
+  id                        String @id @default(cuid())
+  saleListingVerificationId String
+
+  item   SaleVerificationItem
+  status VerificationCheckStatus @default(NOT_VERIFIED)
+  notes  String?
+
+  saleListingVerification SaleListingVerification @relation(fields: [saleListingVerificationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([saleListingVerificationId, item])
+}
+
+/// Append-only history of what happened to a listing. Typed fromValue/
+/// toValue columns cover the two questions anyone actually asks ("when did
+/// this go from 50L to 45L", "who published it") so they stay indexable and
+/// queryable; `detail` is a comment field for the long tail, not a payload
+/// contract — this is deliberately NOT a generic event-sourcing store.
+model SaleListingEvent {
+  id            String  @id @default(cuid())
+  saleListingId String
+  actorUserId   String?
+
+  eventType SaleListingEventType
+  fromValue String?
+  toValue   String?
+  detail    Json?
+
+  saleListing SaleListing @relation(fields: [saleListingId], references: [id], onDelete: Cascade)
+  actor       User?       @relation("SaleListingEventActor", fields: [actorUserId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([saleListingId, createdAt])
+  @@index([eventType])
+}
+
+/// A report against a listing or a seller — exactly one of saleListingId /
+/// reportedOwnerId is set, mirroring the existing Verification model's
+/// polymorphic-over-two-things pattern. Reporter may be anonymous, matching
+/// SaleEnquiry.
+model SaleReport {
+  id              String  @id @default(cuid())
+  saleListingId   String?
+  reportedOwnerId String?
+  reporterUserId  String?
+
+  reporterEmail String?
+  reason        SaleReportReason
+  details       String?
+
+  resolvedAt DateTime?
+  resolution String?
+
+  saleListing   SaleListing? @relation(fields: [saleListingId], references: [id], onDelete: Cascade)
+  reportedOwner MediaOwner?  @relation(fields: [reportedOwnerId], references: [id], onDelete: Cascade)
+  reporter      User?        @relation("SaleReportReporter", fields: [reporterUserId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([saleListingId])
+  @@index([reportedOwnerId])
+}
