@@ -52,8 +52,19 @@ export function HomeSearch({
       onSubmit={submit}
       className="mx-auto mt-9 max-w-4xl rounded-card border border-border bg-surface p-3 shadow-sm"
     >
-      <div className="grid gap-3 md:grid-cols-[1.1fr_1.1fr_1fr_1fr_auto]">
-        <div className="space-y-1.5">
+      {/*
+        Column widths are sized to their actual content rather than even
+        fractions: the date field has to fit a native `dd/mm/yyyy` picker plus
+        its calendar button, and budget needs room for "Max budget (₹)" on one
+        line. Splitting the row evenly squeezed both, wrapping the budget label
+        onto a second line and pushing its input out of line with the others.
+
+        Each field is a flex column with `justify-end`, so the inputs align to
+        the bottom of the row no matter how tall a label ends up — a label that
+        wraps can no longer drag its input out of alignment.
+      */}
+      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_11rem_9rem_auto]">
+        <div className="flex flex-col justify-end gap-1.5">
           <Label htmlFor="hero-city" className="text-xs text-muted-foreground">
             Location
           </Label>
@@ -72,7 +83,7 @@ export function HomeSearch({
           </Select>
         </div>
 
-        <div className="space-y-1.5">
+        <div className="flex flex-col justify-end gap-1.5">
           <Label htmlFor="hero-category" className="text-xs text-muted-foreground">
             Asset type
           </Label>
@@ -91,7 +102,7 @@ export function HomeSearch({
           </Select>
         </div>
 
-        <div className="space-y-1.5">
+        <div className="flex flex-col justify-end gap-1.5">
           <Label htmlFor="hero-from" className="text-xs text-muted-foreground">
             Start date
           </Label>
@@ -104,8 +115,11 @@ export function HomeSearch({
           />
         </div>
 
-        <div className="space-y-1.5">
-          <Label htmlFor="hero-budget" className="text-xs text-muted-foreground">
+        <div className="flex flex-col justify-end gap-1.5">
+          <Label
+            htmlFor="hero-budget"
+            className="whitespace-nowrap text-xs text-muted-foreground"
+          >
             Max budget (₹)
           </Label>
           <Input
@@ -120,7 +134,7 @@ export function HomeSearch({
           />
         </div>
 
-        <div className="flex items-end">
+        <div className="flex flex-col justify-end">
           <Button type="submit" size="lg" className="h-11 w-full md:w-auto">
             <Search className="size-4" />
             Find Media
