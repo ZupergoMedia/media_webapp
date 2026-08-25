@@ -1,3 +1,4 @@
+import { setWorkerUrl } from "maplibre-gl";
 import type { StyleSpecification } from "maplibre-gl";
 
 /**
@@ -10,6 +11,30 @@ import type { StyleSpecification } from "maplibre-gl";
  * Default is `maplibre`, which needs no account or token. Adding a MapTiler key
  * upgrades the cartography to vector tiles with no code change.
  */
+
+/**
+ * Points MapLibre at a self-hosted copy of its worker script, rather than
+ * letting it resolve one automatically.
+ *
+ * MapLibre GL v6 ships its worker as a separate ES module
+ * (dist/maplibre-gl-worker.mjs) that the app must resolve a URL to at
+ * runtime. Turbopack's asset handling does not carry along the worker's own
+ * import of maplibre-gl-shared.mjs when resolving a bundler-relative
+ * `new URL(..., import.meta.url)`, so the default resolution silently
+ * breaks — in production this surfaced as the browser trying to load a
+ * Worker from the page's own URL ("disallowed MIME type text/html"), which
+ * throws during map initialisation and can leave the rest of the page
+ * un-hydrated along with it.
+ *
+ * scripts/copy-maplibre-worker.mjs copies the worker and its sibling shared
+ * chunk into public/maplibre/ (run via predev/prebuild in package.json) so
+ * they are served untouched by any bundler. Guarded for `window` because
+ * this module's client components also render once during SSR, where
+ * `setWorkerUrl` — a MapLibre API that assumes a browser — must not run.
+ */
+if (typeof window !== "undefined") {
+  setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
+}
 
 /**
  * Providers the MapLibre renderer can serve directly.

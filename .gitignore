@@ -45,5 +45,9 @@ next-env.d.ts
 # prisma generated client (regenerated via `pnpm db:generate`)
 /src/generated/
 
+# MapLibre worker files, copied from node_modules by predev/prebuild — see
+# scripts/copy-maplibre-worker.mjs
+/public/maplibre/
+
 # Claude Code local session state — machine/session-specific, not project config
 .claude/scheduled_tasks.lock
