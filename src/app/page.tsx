@@ -221,7 +221,7 @@ export default async function HomePage() {
 
       <footer className="border-t border-border bg-surface py-8">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 text-sm text-muted-foreground">
-          <p>© {new Date().getFullYear()} ZuperGo. Demo marketplace.</p>
+          <p>© {new Date().getFullYear()} ZuperGo Media.</p>
           <nav className="flex gap-4" aria-label="Footer">
             <Link href="/explore" className="hover:text-foreground">
               Explore
