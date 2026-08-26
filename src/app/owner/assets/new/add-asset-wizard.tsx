@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { DynamicSpecFields } from "@/components/owner/dynamic-spec-fields";
+import { ImageUploader } from "@/components/owner/image-uploader";
 import { parseSpecSchema, buildSpecValidator } from "@/lib/specs";
 import {
   PRICING_UNITS,
@@ -539,21 +540,33 @@ export function AddAssetWizard({ taxonomy }: { taxonomy: WizardTaxonomy }) {
                   </div>
                 ))}
 
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => patch({ images: [...form.images, { url: "", alt: "" }] })}
-                >
-                  <Plus className="size-4" />
-                  Add another photo
-                </Button>
+                <div className="flex flex-wrap items-start gap-2">
+                  <ImageUploader
+                    remainingSlots={12 - form.images.filter((i) => i.url.trim()).length}
+                    onUploaded={(urls) => {
+                      // Fills blank rows first, then appends — so uploading
+                      // after adding an empty row does not leave a gap.
+                      const images = [...form.images];
+                      for (const url of urls) {
+                        const blank = images.findIndex((image) => !image.url.trim());
+                        if (blank >= 0) images[blank] = { ...images[blank], url };
+                        else images.push({ url, alt: "" });
+                      }
+                      patch({ images });
+                    }}
+                  />
+
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => patch({ images: [...form.images, { url: "", alt: "" }] })}
+                  >
+                    <Plus className="size-4" />
+                    Add URL manually
+                  </Button>
+                </div>
 
                 {errors.images && <ErrorText>{errors.images}</ErrorText>}
-
-                <p className="text-xs text-subtle-foreground">
-                  Direct file upload arrives with image storage. For now, paste a
-                  hosted image URL.
-                </p>
               </div>
             </StepShell>
           )}

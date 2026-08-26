@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { DynamicSpecFields } from "@/components/owner/dynamic-spec-fields";
+import { ImageUploader } from "@/components/owner/image-uploader";
 import { parseSpecSchema, buildSpecValidator } from "@/lib/specs";
 import { PRICING_UNITS, PRICING_UNIT_LABELS } from "@/lib/asset-schema";
 import { cn } from "@/lib/utils";
@@ -414,14 +415,30 @@ export function EditAssetForm({ initial }: { initial: EditAssetInitial }) {
             </div>
           ))}
 
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => patch({ images: [...form.images, { url: "" }] })}
-          >
-            <Plus className="size-4" />
-            Add photo
-          </Button>
+          <div className="flex flex-wrap items-start gap-2">
+            <ImageUploader
+              remainingSlots={12 - form.images.filter((i) => i.url.trim()).length}
+              onUploaded={(urls) => {
+                // Fills blank rows first, then appends.
+                const images = [...form.images];
+                for (const url of urls) {
+                  const blank = images.findIndex((image) => !image.url.trim());
+                  if (blank >= 0) images[blank] = { url };
+                  else images.push({ url });
+                }
+                patch({ images });
+              }}
+            />
+
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => patch({ images: [...form.images, { url: "" }] })}
+            >
+              <Plus className="size-4" />
+              Add URL manually
+            </Button>
+          </div>
 
           {errors.images && <ErrorText>{errors.images}</ErrorText>}
         </div>
