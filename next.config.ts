@@ -3,12 +3,13 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   images: {
     /**
-     * Remote image hosts.
+     * Remote image hosts. next/image refuses any host not listed here, which is
+     * the intended behaviour: it prevents the app from becoming an open image
+     * proxy.
      *
-     * `picsum.photos` serves the seeded demo imagery. Replace it with the real
-     * asset-storage host (S3/Cloudinary/UploadThing) when image upload lands —
-     * next/image refuses any host not listed here, which is the intended
-     * behaviour: it prevents the app from becoming an open image proxy.
+     * `picsum.photos` serves the seeded demo imagery. Partner-uploaded photos
+     * live on Vercel Blob (below); pasted URLs from any other host will not
+     * render until that host is added here.
      */
     remotePatterns: [
       { protocol: "https", hostname: "picsum.photos" },
