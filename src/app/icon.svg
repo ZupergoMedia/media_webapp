@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="ZuperGo Media">
+  <!--
+    Favicon: a roadside hoarding on splayed legs.
+
+    The legs are the whole idea. An earlier version put the board on a single
+    centred post and it read as a computer monitor on a stand — screen, not
+    street. Two angled legs are what say "structure standing outdoors", and
+    they are the one OOH cue that still survives at 16px.
+
+    Drawn on a 32x32 grid, checked by rasterising at 16, 20 and 32px — the
+    sizes browsers actually use for a tab. Everything is a filled shape rather
+    than a stroke: at this scale a 1px stroke either vanishes or turns to mush.
+
+    One copy bar, not two. Two bars is the more literal poster, but at 16px
+    they collapse into each other and leave a smudge; a single bolder bar keeps
+    the "this carries advertising" read at every size.
+
+    Colours are hard-coded rather than read from the brand CSS custom property.
+    An SVG served as an icon renders outside the document, so it inherits no
+    custom properties; and the tab strip is browser chrome rather than page, so
+    the mark should stay constant in both themes instead of tracking
+    data-theme. Keep in sync with the brand and surface tokens in globals.css:
+    brand #2f43c4, surface #fffefb.
+
+    Note for editors: XML forbids a double hyphen inside a comment, so the
+    token names cannot be written here in their CSS form.
+  -->
+  <rect width="32" height="32" rx="7" fill="#2f43c4" />
+
+  <!-- The board -->
+  <rect x="4.5" y="6" width="23" height="12" rx="1.5" fill="#fffefb" />
+
+  <!-- Copy bar, suggesting a poster without adding detail that mushes. -->
+  <rect x="8" y="10.2" width="14" height="3.6" rx="1.8" fill="#2f43c4" opacity="0.85" />
+
+  <!-- Splayed legs, thick enough to survive downscaling. -->
+  <path d="M11.5 18 L8.6 27.4 h3 l2.4-9.4z" fill="#fffefb" opacity="0.92" />
+  <path d="M20.5 18 L23.4 27.4 h-3 l-2.4-9.4z" fill="#fffefb" opacity="0.92" />
+</svg>
